@@ -1,0 +1,139 @@
+import cv2
+import numpy as np
+import RPi.GPIO as GPIO # 라즈베리파이 GPIO 핀을 쓰기위해 임포트
+from time import sleep  #time 라이브러리의 sleep함수 사용
+from gpiozero import LED
+from gpiozero import Robot
+from gpiozero import Motor
+import time
+
+red_ledL = LED(19) #좌측 LED
+red_ledR = LED(26) #우측 LED
+dc_motorL = Motor(forward = 12, backward = 16) #좌측 모터
+dc_motorR = Motor(forward = 20, backward = 21) #우측 모터
+
+# VideoCapture 객체 생성.
+cap1 = cv2.VideoCapture(2) #cap1 = 2번카메라 = 손 = 운전 
+cap = cv2.VideoCapture(0) #cap = 0번카메라 = 눈 = 비상등
+
+while True: # 특정 키를 누를 때 까지 무한루프 돌림 
+    ret, frame = cap.read()
+    ret1, frame1 = cap1.read()
+    
+    if ret is False: # 비디오 프레임을 제대로 읽었는지 확인
+        break
+        
+    if ret1 is False:
+        break    
+   
+    # 불러온 영상에서 크기를 자름
+    # [탑에서 상단 : 탑에서 하단 , 왼쪽 끝에서 좌측단 : 왼쪽 끝에서 우측단 ]
+    roi = frame[250: 500, 900: 1300] 
+    roi1 = frame1[100: 795, 300: 1300]
+   
+    # 눈roi의 4배 이미지
+    height, width = roi.shape[:2]
+    img_result = cv2.resize(roi, (4*width, 4*height), interpolation = cv2.INTER_LINEAR)
+    
+    rows, cols, _ = img_result.shape
+    rows1, cols1, _ = roi1.shape
+    
+    #roi를 흑백으로 변환
+    gray_roi = cv2.cvtColor(img_result, cv2.COLOR_BGR2GRAY) 
+    gray_roi1 = cv2.cvtColor(roi1, cv2.COLOR_BGR2GRAY) 
+    
+    #흑백 처리된 이미지를 블러 처리
+    gray_roi = cv2.GaussianBlur(gray_roi, (7, 7), 0) 
+    gray_roi1 = cv2.GaussianBlur(gray_roi1, (7, 7), 0)
+    
+    #threshold 처리
+    _, threshold = cv2.threshold(gray_roi, 33, 255, cv2.THRESH_BINARY_INV)
+    _, threshold1 = cv2.threshold(gray_roi1, 25, 255, cv2.THRESH_BINARY_INV)
+    
+    #컨투어 찾고 내림차순으로 정렬
+    _, contours, _ = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contours = sorted(contours, key=lambda x: cv2.contourArea(x), reverse=True)
+    
+    _, contours1, _ = cv2.findContours(threshold1, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    contours1 = sorted(contours1, key=lambda ax: cv2.contourArea(ax), reverse=True)
+    
+    # contours를 한번만 출력(가장 큰 부분(=눈동자)만 출력) 후 for문을 나옴
+    for cnt in contours:
+        (x, y, w, h) = cv2.boundingRect(cnt)
+        cv2.drawContours(img_result, [cnt], -1, (0, 0, 255), 3)
+        cv2.rectangle(img_result, (x, y), (x + w, y + h), (255, 0, 0), 2)
+        cv2.line(img_result, (x + int(w/2), 0), (x + int(w/2), rows), (0, 255, 0), 2)
+        cv2.line(img_result, (0, y + int(h/2)), (cols, y + int(h/2)), (0, 255, 0), 2)
+        break
+    
+    # contours를 한번만 출력(가장 큰 부분(=손의 가운데)만 출력) 후 for문을 나옴    
+    for cnt1 in contours1:
+        (ax, ay, aw, ah) = cv2.boundingRect(cnt1)
+        cv2.drawContours(roi1, [cnt1], -1, (0, 0, 255), 3)
+        cv2.rectangle(roi1, (ax, ay), (ax + aw, ay + ah), (255, 0, 0), 2)
+        cv2.line(roi1, (ax + int(aw/2), 0), (ax + int(aw/2), rows1), (0, 255, 0), 2)
+        cv2.line(roi1, (0, ay + int(ah/2)), (cols1, ay + int(ah/2)), (0, 255, 0), 2)
+        break
+     
+    #print("hand_x = ", x) #손 중앙 위치의 x 좌표값     
+    #print("hand_y = " ,y) #손 중앙 위치의 y 좌표값
+  
+    #print("eye_x = " ,ax) #눈 중앙 위치의 x 좌표값    
+    #print("eye_y = " ,ay) #눈 중앙 위치의 y 좌표값
+    
+    #모터제어
+    if 50 < ax < 650 and 200 <= ay <550: # 손위치 중앙 ->정지
+        print("stop ")
+        dc_motorL.stop()
+        dc_motorR.stop()  
+        
+    elif 50 < ax < 650 and 0 <= ay < 200: # 손위치 위쪽 -> 전진
+        print("FORWARD")
+        dc_motorR.forward(speed=1)
+        dc_motorL.forward(speed=1)      
+    
+    elif 550 <= ay <= 700 and ax >= 0: # 손위치 아래 -> 후진
+        print("BACKWARD")       
+        dc_motorL.backward(speed=1)
+        dc_motorR.backward(speed=1)
+     
+
+    elif ax <= 50 and ay < 550: # 손위치 우측 -> 우회전
+        print('right')
+        dc_motorR.forward(speed=1.0)
+        dc_motorL.backward(speed=0.5)
+    
+    elif 650 <= ax and ay < 550: # 손위치 좌측 -> 좌회전
+        print('left')
+        dc_motorR.backward(speed=0.5)
+        dc_motorL.forward(speed=1.0)
+    
+    
+    # 비상등 제어 (x= 0~400 / y=0~250)
+    if y <= 20: # 위쪽을 볼 때 비상등이 켜짐 
+        print ("EMERGENCY LED on")
+        red_ledR.on() 
+        red_ledL.on() 
+    
+    if y >=220 : #아래쪽을 볼 때 led가 꺼짐
+        print ("EMERGENCY LED off")
+        red_ledR.off() 
+        red_ledL.off() 
+
+    #눈
+    #cv2.imshow("Threshold", threshold) # Threshold
+    #cv2.imshow("gray roi", gray_roi) # gray
+    #cv2.imshow("EYE_Roi_x4", img_result) #roi 4배확대
+    cv2.imshow("EYE_Roi", roi) #roi
+    
+    #손
+    #v2.imshow("Threshold1", threshold1) # Threshold
+    #cv2.imshow("gray roi1", gray_roi1) # gray    
+    cv2.imshow("HAND_Roi1", roi1) #roi       
+        
+    key = cv2.waitKey(30)
+    if key == 27: #ESC 키를 눌렀을 때 종료
+        break        
+
+cv2.destroyAllWindows() #모든 그림창 닫기
+GPIO.cleanup()

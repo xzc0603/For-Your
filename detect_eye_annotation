@@ -1,0 +1,55 @@
+import cv2
+import numpy as np
+
+# VideoCapture 객체 생성.  cv2.VideoCapture(0)이면 실시간 cam 영상을 불러옴. 
+cap = cv2.VideoCapture("0eun.mp4") 
+
+while True: # 특정 키를 누를 때 까지 무한루프 돌림 
+    ret, frame = cap.read() 
+	    
+    if ret is False:  # 비디오 프레임을 제대로 읽었는지 확인 
+        break		
+   
+    #불러온 영상에서 크기를 자름
+    # [탑에서 상단 : 탑에서 하단 , 왼쪽 끝에서 좌측단 : 왼쪽 끝에서 우측단 ]   
+    roi = frame[100: 795, 537: 1300] 
+    
+    rows, cols, _ = roi.shape
+    
+    #roi(원본영상)을 흑백으로 변환 (영상처리만)
+    gray_roi = cv2.cvtColor(roi, cv2.COLOR_BGR2GRAY) 
+    
+    #샤프한 이미지에 blur 효과를 줌.(노이즈제거) (7,7)의 값은 blur 강도 조절량. blur 강도를 높이면 이미지는 부드러워(흐려)지지만 그만큼 인식률이 떨어짐  
+    gray_roi = cv2.GaussianBlur(gray_roi, (7, 7), 0) 
+    
+    #cv2.threshold(img, threshold_value, value, flag) 이미지 처리 함수
+    #img : 처리를 위해 불러올 이미지,영상
+    #threshold_value : 처리를 위한 기준 값
+    #value : threshold_value 값보다 높을때 적용되는 최대값
+    #flag : img를 처리 하는 방법
+    _, threshold = cv2.threshold(gray_roi, 30, 255, cv2.THRESH_BINARY_INV)
+    
+    #contours 찾기 
+    _, contours, _ = cv2.findContours(threshold, cv2.RETR_TREE, cv2.CHAIN_APPROX_SIMPLE)
+    
+	#contours를 내림차순으로 정렬 
+    contours = sorted(contours, key=lambda x: cv2.contourArea(x), reverse=True)
+    
+    # contours를 한번만 출력(가장 큰 부분(=눈동자)만 출력) 후 for문을 나옴  
+    for cnt in contours:
+        (x, y, w, h) = cv2.boundingRect(cnt)
+        cv2.drawContours(roi, [cnt], -1, (0, 0, 255), 3)  #contours 외곽선 그림 
+        cv2.rectangle(roi, (x, y), (x + w, y + h), (255, 0, 0), 2) # 외곽선 주위로 사각형 그림 
+        cv2.line(roi, (x + int(w/2), 0), (x + int(w/2), rows), (0, 255, 0), 2) 
+        cv2.line(roi, (0, y + int(h/2)), (cols, y + int(h/2)), (0, 255, 0), 2)
+        break
+    
+    # 영상을 보여준다. printf와 같은 개념
+    cv2.imshow("Threshold", threshold) # 흑백처리 후 반전된 영상
+    cv2.imshow("gray roi", gray_roi) # 흑백
+    cv2.imshow("Roi", roi) #원본
+    
+    key = cv2.waitKey(30)
+    if key == 27:  #ESC 키를 눌렀을 때 종료 
+        break
+cv2.destroyAllWindows() #모든 그림창 닫기
